@@ -1,7 +1,8 @@
+import { createHash } from "node:crypto";
 import { Common, Main } from "@freelensapp/extensions";
 import { observable, runInAction } from "mobx";
-import { createHash } from "node:crypto";
 import { contextName, ENTITY_SOURCE } from "../common/teleport";
+import { kubectlPath } from "./kubectl";
 import { ensure, kubeconfigPath, listKubeClusters, loginHint, readSession } from "./tsh";
 
 const REFRESH_MS = 60_000;
@@ -31,7 +32,10 @@ export default class TeleportMain extends Main.LensExtension {
         console.warn(`[teleport] IPC handler "${channel}" already registered, keeping it`, error);
       }
     };
-    handle("ensure", (_event, kubeCluster: string) => ensure(kubeCluster));
+    // Resolved per call: a change to the kubectl preference applies without restart.
+    handle("ensure", (_event, kubeCluster: string) =>
+      ensure(kubeCluster, kubectlPath(Common.App.Preferences.getKubectlPath())),
+    );
     handle("session-problem", async () => {
       const session = await readSession();
       return !session || session.expired ? loginHint(session) : undefined;
@@ -40,15 +44,19 @@ export default class TeleportMain extends Main.LensExtension {
     this.addCatalogSource(ENTITY_SOURCE, this.clusters);
     // Never await the network in onActivate: a slow activation is what let
     // Freelens drop the instance mid-way.
-    void this.refresh();
-    this.timer = setInterval(() => void this.refresh(), REFRESH_MS);
+    this.refresh();
+    this.timer = setInterval(() => this.refresh(), REFRESH_MS);
   }
 
   onDeactivate() {
     clearInterval(this.timer);
   }
 
-  private async refresh() {
+  private refresh() {
+    this.doRefresh().catch((error) => console.warn("[teleport] refresh failed", error));
+  }
+
+  private async doRefresh() {
     const session = await readSession();
     // Logged out: keep the last known clusters rather than emptying the catalog
     // under the user's eyes. Clicking one reports the login to do.

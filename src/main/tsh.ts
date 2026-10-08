@@ -7,8 +7,10 @@ import { existsSync, openSync, readFileSync, rmSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
+import { contextName, proxyPort } from "../common/teleport";
+import { isTshProxyKube, listenerPid, processCommandLine, tshBin } from "./platform";
+
 import type { EnsureResult } from "../common/teleport";
-import { proxyPort } from "../common/teleport";
 
 const run = promisify(execFile);
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -33,8 +35,10 @@ export interface Session {
 export async function readSession(): Promise<Session | undefined> {
   let stdout: string;
   try {
-    ({ stdout } = await run("tsh", ["status", "--format=json"], { env: tshEnv() }));
+    ({ stdout } = await run(tshBin, ["status", "--format=json"], { env: tshEnv(), windowsHide: true }));
   } catch (error: any) {
+    // tsh not found on PATH is not a logout: let the caller report it.
+    if (error?.code === "ENOENT") throw error;
     // An expired profile may still be printed with a non-zero exit.
     stdout = error?.stdout ?? "";
   }
@@ -56,7 +60,11 @@ export const loginHint = (session?: Session) =>
   `tsh login --proxy=${session?.proxyHost ?? "<proxy>:443"} --user=${session?.user ?? "<user>"}`;
 
 export async function listKubeClusters(): Promise<string[]> {
-  const { stdout } = await run("tsh", ["kube", "ls", "--format=json"], { env: tshEnv(), timeout: 30_000 });
+  const { stdout } = await run(tshBin, ["kube", "ls", "--format=json"], {
+    env: tshEnv(),
+    timeout: 30_000,
+    windowsHide: true,
+  });
   return (JSON.parse(stdout) as { kube_cluster_name: string }[]).map((c) => c.kube_cluster_name);
 }
 
@@ -75,26 +83,33 @@ export const kubeconfigPath = (session: Session, kubeCluster: string) =>
 
 const logFile = (kubeCluster: string) => join(tshHome(), `freelens-teleport-${kubeCluster}.log`);
 
-async function apiServerAnswers(kubeconfig: string, timeoutSeconds: number): Promise<string | undefined> {
+async function apiServerAnswers(
+  kubectl: string,
+  kubeconfig: string,
+  timeoutSeconds: number,
+): Promise<string | undefined> {
   if (!existsSync(kubeconfig)) return "kubeconfig missing";
   try {
-    await run("kubectl", ["--kubeconfig", kubeconfig, "get", "--raw", "/version", `--request-timeout=${timeoutSeconds}s`]);
+    await run(
+      kubectl,
+      ["--kubeconfig", kubeconfig, "get", "--raw", "/version", `--request-timeout=${timeoutSeconds}s`],
+      {
+        windowsHide: true,
+      },
+    );
     return undefined;
   } catch (error: any) {
     return (error?.stderr || error?.message || String(error)).trim();
   }
 }
 
-// CBA: ss only (Linux). The script also tries lsof for macOS; add it when generifying.
-async function listenerPid(port: number): Promise<number | undefined> {
+const kubeconfigServes = (kubeconfig: string, session: Session, kubeCluster: string) => {
   try {
-    const { stdout } = await run("ss", ["-lntpH", `sport = :${port}`]);
-    const match = stdout.match(/users:\(\("[^"]*",pid=(\d+)/);
-    return match ? Number(match[1]) : undefined;
+    return readFileSync(kubeconfig, "utf8").includes(contextName(session.teleportCluster, kubeCluster));
   } catch {
-    return undefined;
+    return false;
   }
-}
+};
 
 const alive = (pid: number) => {
   try {
@@ -105,20 +120,16 @@ const alive = (pid: number) => {
   }
 };
 
-// Frees the port only if a `tsh proxy kube` holds it (orphan whose kubeconfig got
-// purged). Any other occupant is a real collision: never kill what we did not read.
-async function reclaimPort(port: number): Promise<string | undefined> {
+// Frees the port only if this cluster's own `tsh proxy kube` holds it (orphan
+// whose kubeconfig got purged). Anything else is a real collision: never kill
+// what we did not identify.
+async function reclaimPort(port: number, kubeCluster: string): Promise<string | undefined> {
   const pid = await listenerPid(port);
   if (pid === undefined) return undefined;
 
-  let args = "";
-  try {
-    ({ stdout: args } = await run("ps", ["-p", String(pid), "-o", "args="]));
-  } catch {
-    // process vanished in between, or not ours
-  }
-  if (!args.includes("tsh proxy kube")) {
-    return `Port ${port} is held by another program (pid ${pid}): ${args.trim() || "<unknown>"}`;
+  const commandLine = await processCommandLine(pid);
+  if (!isTshProxyKube(commandLine, kubeCluster)) {
+    return `Port ${port} is held by something other than the ${kubeCluster} proxy (pid ${pid}): ${commandLine || "<unknown>"}`;
   }
 
   process.kill(pid, "SIGTERM");
@@ -134,12 +145,16 @@ async function startProxy(kubeCluster: string, port: number, kubeconfig: string)
   const log = logFile(kubeCluster);
   rmSync(log, { force: true });
   const fd = openSync(log, "w");
-  // Detached like the script's `nohup`: the proxy outlives Freelens and the script reuses it.
-  const child = spawn("tsh", ["proxy", "kube", kubeCluster, "-p", String(port)], {
+  // Detached like a shell `nohup`: the proxy outlives Freelens and shell helpers reuse it.
+  const child = spawn(tshBin, ["proxy", "kube", kubeCluster, "-p", String(port)], {
     detached: true,
     stdio: ["ignore", fd, fd],
     env: tshEnv(),
+    windowsHide: true,
   });
+  // Spawn errors surface through the polling loop's "did not start" message below;
+  // without a listener they would crash the main process.
+  child.on("error", () => {});
   child.unref();
 
   const readLog = () => {
@@ -164,16 +179,16 @@ async function startProxy(kubeCluster: string, port: number, kubeconfig: string)
 // the same port, the loser rewriting the winner's kubeconfig under it.
 const inFlight = new Map<string, Promise<EnsureResult>>();
 
-export function ensure(kubeCluster: string): Promise<EnsureResult> {
+export function ensure(kubeCluster: string, kubectl: string): Promise<EnsureResult> {
   let pending = inFlight.get(kubeCluster);
   if (!pending) {
-    pending = doEnsure(kubeCluster).finally(() => inFlight.delete(kubeCluster));
+    pending = doEnsure(kubeCluster, kubectl).finally(() => inFlight.delete(kubeCluster));
     inFlight.set(kubeCluster, pending);
   }
   return pending;
 }
 
-async function doEnsure(kubeCluster: string): Promise<EnsureResult> {
+async function doEnsure(kubeCluster: string, kubectl: string): Promise<EnsureResult> {
   const session = await readSession();
   if (!session || session.expired) {
     return {
@@ -186,15 +201,21 @@ async function doEnsure(kubeCluster: string): Promise<EnsureResult> {
   const port = proxyPort(kubeCluster);
   const kubeconfig = kubeconfigPath(session, kubeCluster);
 
-  // Nominal path: a live proxy answers /version, nothing to do.
-  if ((await apiServerAnswers(kubeconfig, 5)) === undefined) return { ok: true };
+  // Nominal path: a live proxy answers /version, nothing to do. The kubeconfig path
+  // only depends on the port, so a colliding cluster may own this file: require our context.
+  if (
+    kubeconfigServes(kubeconfig, session, kubeCluster) &&
+    (await apiServerAnswers(kubectl, kubeconfig, 5)) === undefined
+  ) {
+    return { ok: true };
+  }
 
   const fail = (message: string): EnsureResult => ({ ok: false, needsLogin: false, message });
-  const reclaimError = await reclaimPort(port);
+  const reclaimError = await reclaimPort(port, kubeCluster);
   if (reclaimError) return fail(reclaimError);
   const startError = await startProxy(kubeCluster, port, kubeconfig);
   if (startError) return fail(startError);
 
-  const apiError = await apiServerAnswers(kubeconfig, 10);
+  const apiError = await apiServerAnswers(kubectl, kubeconfig, 10);
   return apiError ? fail(`Proxy started but the API server does not answer: ${apiError}`) : { ok: true };
 }

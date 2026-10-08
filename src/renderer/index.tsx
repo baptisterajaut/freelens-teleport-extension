@@ -1,6 +1,7 @@
 import { Renderer } from "@freelensapp/extensions";
-import type { EnsureResult } from "../common/teleport";
 import { ENTITY_SOURCE } from "../common/teleport";
+
+import type { EnsureResult } from "../common/teleport";
 
 export class TeleportRendererIpc extends Renderer.Ipc {}
 
@@ -15,7 +16,15 @@ export default class TeleportRenderer extends Renderer.LensExtension {
     this.disposeHook = Renderer.Catalog.catalogEntities.addOnBeforeRun(async (event) => {
       if (event.target.metadata.source !== ENTITY_SOURCE) return;
 
-      const result: EnsureResult = await ipc.invoke("ensure", event.target.getName());
+      // Freelens only logs a throwing before-run hook and opens the cluster anyway.
+      let result: EnsureResult;
+      try {
+        result = await ipc.invoke("ensure", event.target.getName());
+      } catch (error) {
+        event.preventDefault();
+        Renderer.Component.Notifications.error(`Teleport proxy failed: ${String(error)}`);
+        return;
+      }
       if (!result.ok) {
         event.preventDefault();
         Renderer.Component.Notifications.error(result.message);

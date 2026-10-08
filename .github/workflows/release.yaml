@@ -1,0 +1,43 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - v*
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version-file: .nvmrc
+          package-manager-cache: false
+
+      - run: corepack enable
+
+      - run: pnpm install --frozen-lockfile
+
+      - name: Stamp the version from the tag
+        run: npm version --no-git-tag-version "${GITHUB_REF_NAME#v}"
+
+      - run: pnpm test
+
+      - run: pnpm build
+
+      - run: pnpm pack
+
+      - name: Checksums
+        run: for f in *.tgz; do sha256sum "$f" > "$f.sha256"; done
+
+      - uses: softprops/action-gh-release@v3
+        with:
+          fail_on_unmatched_files: true
+          files: |-
+            *.tgz
+            *.tgz.sha256
