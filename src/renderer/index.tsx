@@ -1,4 +1,4 @@
-import { Renderer } from "@freelensapp/extensions";
+import { Common, Renderer } from "@freelensapp/extensions";
 import { ENTITY_SOURCE } from "../common/teleport";
 
 import type { EnsureResult } from "../common/teleport";
@@ -28,6 +28,16 @@ export default class TeleportRenderer extends Renderer.LensExtension {
       if (!result.ok) {
         event.preventDefault();
         Renderer.Component.Notifications.error(result.message);
+        return;
+      }
+      // freelens-k8s-proxy reads the kubeconfig (and its CA) only when the cluster
+      // connects: drop the stale connection, the open then reconnects on the new proxy.
+      if (
+        result.restarted &&
+        event.target instanceof Common.Catalog.KubernetesCluster &&
+        event.target.status.phase === "connected"
+      ) {
+        await event.target.disconnect();
       }
     });
 

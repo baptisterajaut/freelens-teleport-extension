@@ -32,4 +32,6 @@ export const contextName = (teleportCluster: string, kubeCluster: string) => `${
 
 export const ENTITY_SOURCE = "teleport";
 
-export type EnsureResult = { ok: true } | { ok: false; needsLogin: boolean; message: string };
+// restarted: a new proxy came up with a new local CA, so a connected Freelens
+// cluster still trusts the old one until it reconnects.
+export type EnsureResult = { ok: true; restarted: boolean } | { ok: false; needsLogin: boolean; message: string };

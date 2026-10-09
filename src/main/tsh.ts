@@ -207,7 +207,7 @@ async function doEnsure(kubeCluster: string, kubectl: string): Promise<EnsureRes
     kubeconfigServes(kubeconfig, session, kubeCluster) &&
     (await apiServerAnswers(kubectl, kubeconfig, 5)) === undefined
   ) {
-    return { ok: true };
+    return { ok: true, restarted: false };
   }
 
   const fail = (message: string): EnsureResult => ({ ok: false, needsLogin: false, message });
@@ -217,5 +217,7 @@ async function doEnsure(kubeCluster: string, kubectl: string): Promise<EnsureRes
   if (startError) return fail(startError);
 
   const apiError = await apiServerAnswers(kubectl, kubeconfig, 10);
-  return apiError ? fail(`Proxy started but the API server does not answer: ${apiError}`) : { ok: true };
+  return apiError
+    ? fail(`Proxy started but the API server does not answer: ${apiError}`)
+    : { ok: true, restarted: true };
 }
