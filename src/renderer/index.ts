@@ -44,7 +44,7 @@ export default class TeleportRenderer extends Renderer.LensExtension {
     // Cluster frames load renderer extensions too: warn once, from the root frame.
     // On a hot install the renderer can activate before the main side has
     // registered its handlers: a rejected invoke must not fail activation.
-    if (process.isMainFrame) {
+    if (window.top === window) {
       try {
         const hint: string | undefined = await ipc.invoke("session-problem");
         if (hint) {

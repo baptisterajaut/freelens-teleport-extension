@@ -78,14 +78,12 @@ describe("isTshProxyKube", () => {
     expect(isTshProxyKube(commandLine, "dev")).toBe(true);
   });
 
-  it.each([
-    "kubectl proxy --port 18059",
-    "mytsh proxy kube dev -p 18059",
-    "tsh kube ls",
-    "",
-  ])("rejects %s", (commandLine) => {
-    expect(isTshProxyKube(commandLine, "dev")).toBe(false);
-  });
+  it.each(["kubectl proxy --port 18059", "mytsh proxy kube dev -p 18059", "tsh kube ls", ""])(
+    "rejects %s",
+    (commandLine) => {
+      expect(isTshProxyKube(commandLine, "dev")).toBe(false);
+    },
+  );
 
   it("rejects a proxy serving another cluster on a colliding port", () => {
     expect(isTshProxyKube("tsh proxy kube staging -p 18059", "dev")).toBe(false);

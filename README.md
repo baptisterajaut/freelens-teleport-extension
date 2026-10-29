@@ -10,13 +10,17 @@ Every Kubernetes cluster your Teleport session can see appears in the Freelens c
 
 ## Requirements
 
-Freelens 1.10.x and `tsh`, logged in at least once. On Linux and macOS, Freelens imports the PATH of your login shell, so `tsh` only has to work in a terminal; on Windows it must be on the Windows PATH (user or system), not one set only in a shell profile. No `kubectl` needed: the extension uses the one bundled with Freelens, or the "Path to kubectl binary" preference when set.
+Freelens 2.x and `tsh`, logged in at least once. For Freelens 1.10, use a 0.1.x release. On Linux and macOS, Freelens imports the PATH of your login shell, so `tsh` only has to work in a terminal; on Windows it must be on the Windows PATH (user or system), not one set only in a shell profile. No `kubectl` needed: the extension runs the kubectl Freelens runs outside a cluster, the bundled one, or the "Path to kubectl binary" preference when downloading kubectl binaries is turned off.
 
 ## Install
 
-In Freelens, open Extensions, paste the URL of the `.tgz` asset from the [latest release](https://github.com/baptisterajaut/freelens-teleport-extension/releases/latest), and install. Then restart Freelens: on a fresh install Freelens 1.10 can loop enabling and disabling an extension ([freelensapp/freelens#1005](https://github.com/freelensapp/freelens/issues/1005)), and a restart settles it.
+In Freelens, open Extensions, paste the URL of the `.tgz` asset from the [latest release](https://github.com/baptisterajaut/freelens-teleport-extension/releases/latest), and install.
 
-Upgrading in place can race with the removal of the previous version and leave an empty extension. If that happens: quit Freelens, delete `~/.freelens/extensions/freelens-teleport-extension`, start Freelens, install the new `.tgz`.
+Coming from Freelens 1.x: v2 does not migrate extensions. Install the new release, then delete the leftovers of the 1.x one, `~/.freelens/extensions/freelens-teleport-extension` and `node_modules/freelens-teleport-extension` in the Freelens data directory (`~/.config/Freelens` on Linux).
+
+## Development
+
+Needs Node 24 (`.nvmrc`). `pnpm install && pnpm build`, then install the checkout's directory from the Extensions page: Freelens registers it in place. `pnpm dev` rebuilds on change, and Freelens reloads the extension after each rebuild.
 
 ## Sharing proxies with your shell
 
@@ -39,4 +43,4 @@ Tested on Linux. macOS should work and is not tested yet. The Windows code paths
 
 ## License
 
-[Unlicense](LICENSE). The build files taken from [freelens-example-extension](https://github.com/freelensapp/freelens-example-extension) (`biome.jsonc`, `build/global-externals.js`, `electron.vite.config.js`, `tsconfig.json`, `pnpm-workspace.yaml`) stay under their MIT license, see [LICENSE-freelens-template](LICENSE-freelens-template).
+[Unlicense](LICENSE). The build files taken from [freelens-example-extension](https://github.com/freelensapp/freelens-example-extension) (`biome.jsonc`, `build/vite-plugin-host-modules.mjs`, `vite.config.mjs`, the `tsconfig*.json` files, `pnpm-workspace.yaml`) stay under their MIT license, see [LICENSE-freelens-template](LICENSE-freelens-template).

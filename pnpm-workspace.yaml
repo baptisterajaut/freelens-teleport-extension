@@ -1,8 +1,16 @@
-onlyBuiltDependencies:
-  - '@parcel/watcher'
-  - electron
-  - esbuild
-  - node-pty
-  - playwright
+allowBuilds:
+  # Types only: the binary is never run, so skip its download.
+  electron: false
+  esbuild: false
+
+engineStrict: true
+
+# @freelensapp/extensions and its stack are adopted on the day of a Freelens
+# release, younger than pnpm's minimumReleaseAge (1 day by default).
+minimumReleaseAgeExclude:
+  - '@freelensapp/extensions'
+  - electron@44.10.0
 
 shellEmulator: true
+
+strictPeerDependencies: true

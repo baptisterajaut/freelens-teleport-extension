@@ -2,7 +2,6 @@ import { createHash } from "node:crypto";
 import { Common, Main } from "@freelensapp/extensions";
 import { observable, runInAction } from "mobx";
 import { contextName, ENTITY_SOURCE } from "../common/teleport";
-import { kubectlPath } from "./kubectl";
 import { ensure, kubeconfigPath, listKubeClusters, loginHint, readSession } from "./tsh";
 
 const REFRESH_MS = 60_000;
@@ -33,9 +32,9 @@ export default class TeleportMain extends Main.LensExtension {
       }
     };
     // Resolved per call: a change to the kubectl preference applies without restart.
-    handle("ensure", (_event, kubeCluster: string) =>
-      ensure(kubeCluster, kubectlPath(Common.App.Preferences.getKubectlPath())),
-    );
+    // No cluster id: the host rejects it until the cluster is connected, and this
+    // runs before the connection.
+    handle("ensure", async (_event, kubeCluster: string) => ensure(kubeCluster, await Main.Shell.getKubectlPath()));
     handle("session-problem", async () => {
       const session = await readSession();
       return !session || session.expired ? loginHint(session) : undefined;
